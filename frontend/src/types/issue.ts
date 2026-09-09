@@ -1,5 +1,11 @@
 export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
 
+export type UpdateableIssueStatus = 'open' | 'in_progress' | 'resolved';
+
+export interface UpdateIssueStatusRequest {
+  status: UpdateableIssueStatus;
+}
+
 export type IssueSeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export interface AIAnalysis {

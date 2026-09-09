@@ -3,11 +3,13 @@ import {
   CreateIssueRequest,
   Issue,
   IssueListResponse,
-  ListIssuesQuery
+  ListIssuesQuery,
+  UpdateableIssueStatus
 } from '../types/issue.types';
 import { IIssueRepository, issueRepository } from '../repositories/issue.repository';
 import { AIService, aiService } from './ai.service';
-import { NotFoundError } from '../utils/errors';
+import { NotFoundError, ValidationError } from '../utils/errors';
+
 
 export class IssueService {
   constructor(
@@ -76,6 +78,23 @@ export class IssueService {
     }
     return issue;
   }
+
+  public async updateIssueStatus(id: string, status: string): Promise<Issue> {
+    const allowedStatuses: UpdateableIssueStatus[] = ['open', 'in_progress', 'resolved'];
+    if (!allowedStatuses.includes(status as UpdateableIssueStatus)) {
+      throw new ValidationError(
+        `Invalid status '${status}'. Allowed statuses are: ${allowedStatuses.join(', ')}`
+      );
+    }
+
+    const updatedIssue = await this.repository.updateStatus(id, status as UpdateableIssueStatus);
+    if (!updatedIssue) {
+      throw new NotFoundError(`Issue with ID '${id}' not found.`);
+    }
+
+    return updatedIssue;
+  }
 }
+
 
 export const issueService = new IssueService();

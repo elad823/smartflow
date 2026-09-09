@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Issue, IssueStatus, IssueSeverity, SortField, SortOrder, PaginationMeta } from '../types/issue';
+import { Issue, IssueStatus, IssueSeverity, SortField, SortOrder, PaginationMeta, UpdateableIssueStatus } from '../types/issue';
+
 import { issueService } from '../services/issueService';
 import { Header } from '../components/Header';
 import { StatsOverview } from '../components/StatsOverview';
@@ -98,6 +99,15 @@ export default function DashboardPage() {
     loadIssues();
   };
 
+  const handleUpdateStatus = async (id: string, newStatus: UpdateableIssueStatus) => {
+    const updated = await issueService.updateIssueStatus(id, newStatus);
+    setIssues((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    if (selectedIssue && selectedIssue.id === id) {
+      setSelectedIssue(updated);
+    }
+  };
+
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Top Header */}
@@ -175,7 +185,9 @@ export default function DashboardPage() {
       <IssueDetailModal
         issue={selectedIssue}
         onClose={() => setSelectedIssue(null)}
+        onUpdateStatus={handleUpdateStatus}
       />
+
 
       {/* Create Issue Modal */}
       <CreateIssueModal

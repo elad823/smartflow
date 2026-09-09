@@ -167,8 +167,117 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+    patch:
+      summary: Update issue status
+      description: Updates the status of an existing issue. Supported statuses are open, in_progress, and resolved.
+      operationId: updateIssueStatus
+      tags:
+        - Issues
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the issue (UUID format).
+          schema:
+            type: string
+            format: uuid
+          example: "a3b8c2d1-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIssueStatusRequest'
+      responses:
+        '200':
+          description: Issue status successfully updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '400':
+          description: Bad Request - Invalid UUID or invalid status value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Issue not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/issues/{id}/status:
+    patch:
+      summary: Update issue status (sub-resource route)
+      description: Alternative endpoint to update the status of an existing issue. Supported statuses are open, in_progress, and resolved.
+      operationId: updateIssueStatusDirect
+      tags:
+        - Issues
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the issue (UUID format).
+          schema:
+            type: string
+            format: uuid
+          example: "a3b8c2d1-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIssueStatusRequest'
+      responses:
+        '200':
+          description: Issue status successfully updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '400':
+          description: Bad Request - Invalid UUID or invalid status value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Issue not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
+    UpdateIssueStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - open
+            - in_progress
+            - resolved
+          description: New status to apply to the issue.
+          example: in_progress
+
     IssueStatus:
       type: string
       enum:

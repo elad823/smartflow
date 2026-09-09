@@ -1,5 +1,11 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
-import { CreateIssueRequest, GetIssueParams, ListIssuesQuery } from '../types/issue.types';
+import {
+  CreateIssueRequest,
+  GetIssueParams,
+  ListIssuesQuery,
+  UpdateIssueStatusRequest
+} from '../types/issue.types';
+
 import { IssueService, issueService } from '../services/issue.service';
 
 export class IssueController {
@@ -28,6 +34,15 @@ export class IssueController {
     const issue = await this.service.getIssueById(request.params.id);
     reply.status(200).send(issue);
   };
+
+  public updateIssueStatus = async (
+    request: FastifyRequest<{ Params: GetIssueParams; Body: UpdateIssueStatusRequest }>,
+    reply: FastifyReply
+  ): Promise<void> => {
+    const issue = await this.service.updateIssueStatus(request.params.id, request.body.status);
+    reply.status(200).send(issue);
+  };
 }
+
 
 export const issueController = new IssueController();

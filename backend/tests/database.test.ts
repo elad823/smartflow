@@ -74,9 +74,27 @@ describe('SQLite Database & Repository', () => {
     expect(page2.issues.length).toBe(1);
   });
 
+  it('updates issue status and updatedAt timestamp', async () => {
+    const targetId = 'a3b8c2d1-4e5f-6a7b-8c9d-0e1f2a3b4c5d';
+    const before = await repo.findById(targetId);
+    expect(before?.status).toBe('open');
+
+    const updated = await repo.updateStatus(targetId, 'in_progress');
+    expect(updated).not.toBeNull();
+    expect(updated?.status).toBe('in_progress');
+    expect(updated?.id).toBe(targetId);
+
+    const resolved = await repo.updateStatus(targetId, 'resolved');
+    expect(resolved?.status).toBe('resolved');
+
+    const nonExistent = await repo.updateStatus('00000000-0000-0000-0000-000000000000', 'open');
+    expect(nonExistent).toBeNull();
+  });
+
   it('clears database properly', async () => {
     await repo.clear();
     const { total } = await repo.findMany({});
     expect(total).toBe(0);
   });
 });
+

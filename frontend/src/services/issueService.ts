@@ -5,8 +5,10 @@ import {
   IssueQueryParams,
   ErrorResponse,
   IssueStatus,
-  IssueSeverity
+  IssueSeverity,
+  UpdateableIssueStatus
 } from '../types/issue';
+
 import { INITIAL_MOCK_ISSUES } from '../lib/mockData';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
@@ -265,6 +267,87 @@ export const issueService = {
 
       mockIssuesStore.unshift(created);
       return created;
+    }
+  },
+
+  /**
+   * Update the status of an existing issue
+   */
+  async updateIssueStatus(id: string, status: UpdateableIssueStatus): Promise<Issue> {
+    const allowed: UpdateableIssueStatus[] = ['open', 'in_progress', 'resolved'];
+    if (!allowed.includes(status)) {
+      throw new IssueServiceError(
+        `Invalid status '${status}'. Allowed values are: ${allowed.join(', ')}`,
+        400,
+        {
+          statusCode: 400,
+          error: 'Bad Request',
+          message: `Invalid status '${status}'. Allowed values are: ${allowed.join(', ')}`
+        }
+      );
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const res = await fetch(`${API_BASE_URL}/api/issues/${id}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ status }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        let errData: ErrorResponse;
+        try {
+          errData = await res.json();
+        } catch {
+          errData = {
+            statusCode: res.status,
+            error: res.statusText,
+            message: `Failed to update status (${res.status})`
+          };
+        }
+        throw new IssueServiceError(errData.message, res.status, errData);
+      }
+
+      const updated: Issue = await res.json();
+      const mockIndex = mockIssuesStore.findIndex(i => i.id === id);
+      if (mockIndex !== -1) {
+        mockIssuesStore[mockIndex] = updated;
+      }
+      return updated;
+    } catch (err: any) {
+      if (err instanceof IssueServiceError) {
+        throw err;
+      }
+
+      const isOnline = await this.checkBackendHealth();
+      if (isOnline) {
+        throw new IssueServiceError(
+          err.message || 'Failed to update issue status on server.',
+          500
+        );
+      }
+
+      // Offline fallback: update local mock store
+      const issue = mockIssuesStore.find(i => i.id === id);
+      if (!issue) {
+        throw new IssueServiceError(`Issue with ID ${id} not found`, 404, {
+          statusCode: 404,
+          error: 'Not Found',
+          message: `Issue with ID ${id} not found`
+        });
+      }
+
+      issue.status = status;
+      issue.updatedAt = new Date().toISOString();
+      return { ...issue };
     }
   },
 

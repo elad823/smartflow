@@ -250,4 +250,115 @@ describe('SmartFlow Issues API Endpoints', () => {
       expect(error.error).toBe('Bad Request');
     });
   });
+
+  describe('PATCH /api/issues/:id/status and PATCH /api/issues/:id', () => {
+    const targetId = 'a3b8c2d1-4e5f-6a7b-8c9d-0e1f2a3b4c5d';
+
+    it('updates status to in_progress using /api/issues/:id/status (200 OK)', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/issues/${targetId}/status`,
+        payload: { status: 'in_progress' }
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data.id).toBe(targetId);
+      expect(data.status).toBe('in_progress');
+      expect(data.updatedAt).toBeDefined();
+    });
+
+    it('updates status to resolved using /api/issues/:id (200 OK)', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/issues/${targetId}`,
+        payload: { status: 'resolved' }
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data.id).toBe(targetId);
+      expect(data.status).toBe('resolved');
+    });
+
+    it('reopens issue back to open (200 OK)', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/issues/${targetId}/status`,
+        payload: { status: 'open' }
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data.id).toBe(targetId);
+      expect(data.status).toBe('open');
+    });
+
+    it('returns 400 when status is not in allowed set (open, in_progress, resolved)', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/issues/${targetId}/status`,
+        payload: { status: 'closed' }
+      });
+
+      expect(response.statusCode).toBe(400);
+      const error = JSON.parse(response.payload);
+      expect(error.statusCode).toBe(400);
+      expect(error.error).toBe('Bad Request');
+    });
+
+    it('returns 400 when status is invalid arbitrary string', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/issues/${targetId}/status`,
+        payload: { status: 'random_status' }
+      });
+
+      expect(response.statusCode).toBe(400);
+      const error = JSON.parse(response.payload);
+      expect(error.statusCode).toBe(400);
+      expect(error.error).toBe('Bad Request');
+    });
+
+    it('returns 400 when request body is empty', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/issues/${targetId}/status`,
+        payload: {}
+      });
+
+      expect(response.statusCode).toBe(400);
+      const error = JSON.parse(response.payload);
+      expect(error.statusCode).toBe(400);
+      expect(error.error).toBe('Bad Request');
+    });
+
+    it('returns 404 when target issue UUID does not exist', async () => {
+      const nonExistentId = '00000000-0000-0000-0000-000000000000';
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/issues/${nonExistentId}/status`,
+        payload: { status: 'in_progress' }
+      });
+
+      expect(response.statusCode).toBe(404);
+      const error = JSON.parse(response.payload);
+      expect(error.statusCode).toBe(404);
+      expect(error.error).toBe('Not Found');
+    });
+
+    it('returns 400 when issue ID is not a valid UUID format', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/issues/not-a-valid-uuid/status',
+        payload: { status: 'in_progress' }
+      });
+
+      expect(response.statusCode).toBe(400);
+      const error = JSON.parse(response.payload);
+      expect(error.statusCode).toBe(400);
+      expect(error.error).toBe('Bad Request');
+    });
+  });
 });
+

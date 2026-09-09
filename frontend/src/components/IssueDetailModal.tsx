@@ -1,17 +1,21 @@
 'use client';
 
 import React from 'react';
-import { Issue } from '../types/issue';
+import { Issue, UpdateableIssueStatus } from '../types/issue';
+
 import { formatDate, getSeverityConfig, getStatusConfig } from '../lib/utils';
-import { X, Sparkles, CheckCircle2, Copy, Check, Clock, Tag } from 'lucide-react';
+import { X, Sparkles, CheckCircle2, Copy, Check, Clock, Tag, Loader2, AlertCircle } from 'lucide-react';
 
 interface IssueDetailModalProps {
   issue: Issue | null;
   onClose: () => void;
+  onUpdateStatus?: (issueId: string, status: UpdateableIssueStatus) => Promise<void> | void;
 }
 
-export const IssueDetailModal: React.FC<IssueDetailModalProps> = ({ issue, onClose }) => {
+export const IssueDetailModal: React.FC<IssueDetailModalProps> = ({ issue, onClose, onUpdateStatus }) => {
   const [copied, setCopied] = React.useState(false);
+  const [isUpdating, setIsUpdating] = React.useState(false);
+  const [updateError, setUpdateError] = React.useState<string | null>(null);
 
   if (!issue) return null;
 
@@ -24,6 +28,22 @@ export const IssueDetailModal: React.FC<IssueDetailModalProps> = ({ issue, onClo
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const handleStatusChange = async (newStatus: UpdateableIssueStatus) => {
+    if (!issue || issue.status === newStatus || isUpdating) return;
+    setIsUpdating(true);
+    setUpdateError(null);
+    try {
+      if (onUpdateStatus) {
+        await onUpdateStatus(issue.id, newStatus);
+      }
+    } catch (err: any) {
+      setUpdateError(err.message || 'Failed to update status');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
@@ -79,6 +99,46 @@ export const IssueDetailModal: React.FC<IssueDetailModalProps> = ({ issue, onClo
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               <span>Created {formatDate(issue.createdAt)}</span>
             </div>
+          </div>
+
+          {/* Status Updater Section */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Update Status</h4>
+                <p className="text-xs text-slate-500 mt-0.5">Move issue through lifecycle stages</p>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
+                {(['open', 'in_progress', 'resolved'] as UpdateableIssueStatus[]).map((st) => {
+                  const cfg = getStatusConfig(st);
+                  const isCurrent = issue.status === st;
+                  return (
+                    <button
+                      key={st}
+                      type="button"
+                      disabled={isUpdating || isCurrent}
+                      onClick={() => handleStatusChange(st)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                        isCurrent
+                          ? `${cfg.badgeClass} font-semibold shadow-xs`
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-50'
+                      }`}
+                    >
+                      {isUpdating && isCurrent && <Loader2 className="w-3 h-3 animate-spin" />}
+                      <span>{cfg.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {updateError && (
+              <div className="mt-2.5 flex items-center gap-1.5 text-xs text-rose-600 bg-rose-50 p-2 rounded-lg border border-rose-200">
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>{updateError}</span>
+              </div>
+            )}
           </div>
 
           {/* Issue Description */}

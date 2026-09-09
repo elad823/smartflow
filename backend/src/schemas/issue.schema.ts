@@ -175,3 +175,34 @@ export const getIssueSchema: FastifySchema = {
     500: errorResponseSchema
   }
 };
+
+export const updateIssueStatusSchema: FastifySchema = {
+  params: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      id: {
+        type: 'string',
+        format: 'uuid'
+      }
+    }
+  },
+  body: {
+    type: 'object',
+    required: ['status'],
+    properties: {
+      status: {
+        type: 'string',
+        enum: ['open', 'in_progress', 'resolved']
+      }
+    },
+    additionalProperties: false
+  },
+  response: {
+    200: issueSchema,
+    400: errorResponseSchema,
+    404: errorResponseSchema,
+    500: errorResponseSchema
+  }
+};
+
