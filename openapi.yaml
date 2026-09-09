@@ -1,0 +1,336 @@
+openapi: 3.0.3
+info:
+  title: SmartFlow Issue Tracker & AI Analysis API
+  description: >
+    API for creating, analyzing, and managing issues.
+    Includes automated AI-driven categorization, severity scoring, and recommended remediation steps.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local Development Server
+
+paths:
+  /api/issues:
+    post:
+      summary: Create and analyze a new issue
+      description: Accepts a raw issue title and description, runs automated AI analysis, and returns the enriched issue object.
+      operationId: createIssue
+      tags:
+        - Issues
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIssueRequest'
+      responses:
+        '201':
+          description: Issue successfully created and analyzed by AI.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '400':
+          description: Bad Request - Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: List all issues with filtering and sorting
+      description: Retrieves a paginated list of issues with optional filtering by status, severity, category, and custom sorting.
+      operationId: listIssues
+      tags:
+        - Issues
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by current issue status.
+          schema:
+            $ref: '#/components/schemas/IssueStatus'
+          example: open
+        - name: severity
+          in: query
+          required: false
+          description: Filter by AI-evaluated severity level.
+          schema:
+            $ref: '#/components/schemas/IssueSeverity'
+          example: high
+        - name: category
+          in: query
+          required: false
+          description: Filter by issue category.
+          schema:
+            type: string
+          example: Database
+        - name: sortBy
+          in: query
+          required: false
+          description: Field to sort results by.
+          schema:
+            type: string
+            enum: [createdAt, updatedAt, severity, status, title]
+            default: createdAt
+        - name: sortOrder
+          in: query
+          required: false
+          description: Sort direction.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: page
+          in: query
+          required: false
+          description: Page number for pagination.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Number of items per page.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Successfully retrieved list of issues.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueListResponse'
+        '400':
+          description: Invalid query parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/issues/{id}:
+    get:
+      summary: Get issue by ID
+      description: Fetches complete details and AI analysis for a specific issue.
+      operationId: getIssueById
+      tags:
+        - Issues
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the issue (UUID format).
+          schema:
+            type: string
+            format: uuid
+          example: "a3b8c2d1-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+      responses:
+        '200':
+          description: Issue found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '400':
+          description: Invalid ID format.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Issue not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    IssueStatus:
+      type: string
+      enum:
+        - open
+        - in_progress
+        - resolved
+        - closed
+      example: open
+
+    IssueSeverity:
+      type: string
+      enum:
+        - low
+        - medium
+        - high
+        - critical
+      example: high
+
+    CreateIssueRequest:
+      type: object
+      required:
+        - title
+        - description
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 150
+          description: Brief summary of the issue.
+          example: "PostgreSQL connection pool exhausted in production"
+        description:
+          type: string
+          minLength: 10
+          description: Free-text detailed description of the problem.
+          example: "Multiple microservices started failing with 'Connection timeout' errors under heavy traffic. The database pool limit was hit and queries are hanging."
+
+    AIAnalysis:
+      type: object
+      required:
+        - summary
+        - detectedCategory
+        - recommendedAction
+        - confidenceScore
+      properties:
+        summary:
+          type: string
+          description: AI-generated executive summary of the issue.
+          example: "Connection pool exhaustion causing cascading request timeouts across dependent microservices."
+        detectedCategory:
+          type: string
+          description: AI-inferred category classification.
+          example: "Database"
+        confidenceScore:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Confidence score of the AI classification.
+          example: 0.96
+        recommendedAction:
+          type: string
+          description: Prescribed immediate remediation steps suggested by the AI.
+          example: "Increase maximum connection pool size in PgBouncer, check for leaking unclosed database sessions in the auth service, and review long-running queries."
+
+    Issue:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - status
+        - severity
+        - category
+        - aiAnalysis
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "a3b8c2d1-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+        title:
+          type: string
+          example: "PostgreSQL connection pool exhausted in production"
+        description:
+          type: string
+          example: "Multiple microservices started failing with 'Connection timeout' errors under heavy traffic. The database pool limit was hit and queries are hanging."
+        status:
+          $ref: '#/components/schemas/IssueStatus'
+        severity:
+          $ref: '#/components/schemas/IssueSeverity'
+        category:
+          type: string
+          example: "Database"
+        aiAnalysis:
+          $ref: '#/components/schemas/AIAnalysis'
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-09T10:15:30.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-09-09T10:15:32.450Z"
+
+    PaginationMeta:
+      type: object
+      required:
+        - page
+        - limit
+        - totalItems
+        - totalPages
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        totalItems:
+          type: integer
+          example: 45
+        totalPages:
+          type: integer
+          example: 3
+
+    IssueListResponse:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    ErrorResponse:
+      type: object
+      required:
+        - statusCode
+        - error
+        - message
+      properties:
+        statusCode:
+          type: integer
+          description: HTTP Status Code
+          example: 400
+        error:
+          type: string
+          description: Error type or category
+          example: "Bad Request"
+        message:
+          type: string
+          description: Descriptive error message
+          example: "Validation failed: 'title' must be at least 3 characters long."
+        details:
+          type: array
+          description: Optional detailed list of validation or field-specific errors
+          items:
+            type: string
+          example:
+            - "'title' is required and must not be empty"
