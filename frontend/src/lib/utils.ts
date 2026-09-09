@@ -60,8 +60,9 @@ export function getStatusConfig(status: IssueStatus) {
     case 'in_progress':
       return {
         label: 'In Progress',
-        badgeClass: 'bg-sky-50 text-sky-700 border-sky-200',
+        badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
       };
+
     case 'resolved':
       return {
         label: 'Resolved',

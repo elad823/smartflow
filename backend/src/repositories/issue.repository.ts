@@ -16,10 +16,12 @@ export interface FindManyOptions {
 export interface IIssueRepository {
   create(issue: Issue): Promise<Issue>;
   findById(id: string): Promise<Issue | null>;
+  updateStatus(id: string, status: IssueStatus): Promise<Issue | null>;
   findMany(options: FindManyOptions): Promise<{ issues: Issue[]; total: number }>;
   clear(): Promise<void>;
   seed(issues: Issue[]): Promise<void>;
 }
+
 
 interface IssueRow {
   id: string;
@@ -101,6 +103,21 @@ export class SqliteIssueRepository implements IIssueRepository {
     const row = stmt.get(id) as IssueRow | undefined;
     return row ? rowToIssue(row) : null;
   }
+
+  public async updateStatus(id: string, status: IssueStatus): Promise<Issue | null> {
+    const now = new Date().toISOString();
+    const stmt = this.db.prepare(`
+      UPDATE issues
+      SET status = ?, updated_at = ?
+      WHERE id = ?
+    `);
+    const result = stmt.run(status, now, id);
+    if (result.changes === 0) {
+      return null;
+    }
+    return this.findById(id);
+  }
+
 
   public async findMany(options: FindManyOptions): Promise<{ issues: Issue[]; total: number }> {
     const conditions: string[] = [];

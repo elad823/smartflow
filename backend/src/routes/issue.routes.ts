@@ -3,9 +3,15 @@ import { issueController } from '../controllers/issue.controller';
 import {
   createIssueSchema,
   getIssueSchema,
-  listIssuesSchema
+  listIssuesSchema,
+  updateIssueStatusSchema
 } from '../schemas/issue.schema';
-import { CreateIssueRequest, GetIssueParams, ListIssuesQuery } from '../types/issue.types';
+import {
+  CreateIssueRequest,
+  GetIssueParams,
+  ListIssuesQuery,
+  UpdateIssueStatusRequest
+} from '../types/issue.types';
 
 export const issueRoutes: FastifyPluginAsync = async (fastify: FastifyInstance): Promise<void> => {
   // POST /api/issues - Create and analyze a new issue
@@ -28,4 +34,19 @@ export const issueRoutes: FastifyPluginAsync = async (fastify: FastifyInstance):
     { schema: getIssueSchema },
     issueController.getIssueById
   );
+
+  // PATCH /api/issues/:id/status - Update issue status
+  fastify.patch<{ Params: GetIssueParams; Body: UpdateIssueStatusRequest }>(
+    '/issues/:id/status',
+    { schema: updateIssueStatusSchema },
+    issueController.updateIssueStatus
+  );
+
+  // PATCH /api/issues/:id - Update issue status
+  fastify.patch<{ Params: GetIssueParams; Body: UpdateIssueStatusRequest }>(
+    '/issues/:id',
+    { schema: updateIssueStatusSchema },
+    issueController.updateIssueStatus
+  );
 };
+
