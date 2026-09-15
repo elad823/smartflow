@@ -7,14 +7,92 @@ export interface AIAnalysisResult {
   severity: IssueSeverity;
   priority: IssuePriority;
   analysis: AIAnalysis;
+  iterations?: number;
 }
 
 export interface GeminiIssueAnalysisResponse {
-  category: string;
-  priority: string;
+  category?: string;
+  priority?: string;
   summary?: string;
   confidenceScore?: number;
   recommendedAction?: string;
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: string[];
+  data?: {
+    category: string;
+    priority: IssuePriority;
+    summary: string;
+    confidenceScore: number;
+    recommendedAction: string;
+  };
+}
+
+const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
+
+/**
+ * Validation function verifying that model output contains mandatory fields
+ * and adheres to the expected schema.
+ */
+export function validateClassificationOutput(raw: any, title = '', description = ''): ValidationResult {
+  const errors: string[] = [];
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      isValid: false,
+      errors: ['Model output must be a valid JSON object.']
+    };
+  }
+
+  // 1. Validate mandatory field: category
+  if (!raw.category || typeof raw.category !== 'string' || raw.category.trim().length === 0) {
+    errors.push("Mandatory field 'category' is missing or empty.");
+  }
+
+  // 2. Validate mandatory field: priority
+  if (!raw.priority || typeof raw.priority !== 'string' || raw.priority.trim().length === 0) {
+    errors.push("Mandatory field 'priority' is missing or empty.");
+  } else {
+    const normalizedPriority = raw.priority.toLowerCase().trim();
+    if (!VALID_PRIORITIES.includes(normalizedPriority as any)) {
+      errors.push(
+        `Field 'priority' has invalid value '${raw.priority}'. Must be one of: ${VALID_PRIORITIES.join(', ')}.`
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    return { isValid: false, errors };
+  }
+
+  const category = raw.category.trim();
+  const priority = raw.priority.toLowerCase().trim() as IssuePriority;
+  const summary =
+    typeof raw.summary === 'string' && raw.summary.trim().length > 0
+      ? raw.summary.trim()
+      : `${title.trim()}: Tagged with ${priority} priority in ${category}.`;
+  const confidenceScore =
+    typeof raw.confidenceScore === 'number'
+      ? Math.max(0, Math.min(1, raw.confidenceScore))
+      : 0.95;
+  const recommendedAction =
+    typeof raw.recommendedAction === 'string' && raw.recommendedAction.trim().length > 0
+      ? raw.recommendedAction.trim()
+      : `Investigate ${category.toLowerCase()} diagnostics and inspect application logs for ${title.trim()}.`;
+
+  return {
+    isValid: true,
+    errors: [],
+    data: {
+      category,
+      priority,
+      summary,
+      confidenceScore,
+      recommendedAction
+    }
+  };
 }
 
 export class AIService {
@@ -38,129 +116,148 @@ export class AIService {
   }
 
   /**
-   * Asynchronously calls Gemini with structured JSON output,
-   * equipped with automatic model fallback to handle transient 503 high-demand spikes.
+   * Primary entry point for issue analysis via autonomous Agentic Loop.
    */
   public async analyzeIssue(title: string, description: string): Promise<AIAnalysisResult> {
-    const prompt = `You are an expert AI triage agent for the SmartFlow Issue Tracker.
-Analyze the following issue report:
-Title: "${title}"
-Description: "${description}"
+    return this.runAgenticLoop(title, description);
+  }
 
-Evaluate the issue content and return ONLY a valid JSON object (no markdown, no code fences, no extra text) with the following structure:
-{
-  "category": "Frontend" | "Backend" | "Infrastructure" | "Database" | "Security" | "Performance" | "Network",
-  "priority": "low" | "medium" | "high" | "critical",
-  "summary": "Executive summary of the issue (1-2 sentences)",
-  "confidenceScore": 0.95,
-  "recommendedAction": "Concrete immediate steps recommended to resolve or mitigate this issue"
-}`;
+  /**
+   * Autonomous Agentic Loop:
+   * 1. Calls Gemini model with structured prompt.
+   * 2. Validates output with validateClassificationOutput().
+   * 3. On failure or invalid data structure, feeds back validation errors and retries automatically.
+   * 4. Once validated successfully, returns verified analysis for database persistence.
+   */
+  public async runAgenticLoop(
+    title: string,
+    description: string,
+    maxRetries = 3
+  ): Promise<AIAnalysisResult> {
+    if (!this.client) {
+      console.warn('⚠️ No Gemini client configured. Falling back to local triage engine.');
+      return this.fallbackAnalysis(title, description);
+    }
 
-    if (this.client) {
-      // Candidate models for graceful fallback if one model is congested (503)
-      const candidateModels = Array.from(
-        new Set([this.model, 'gemini-2.5-flash', 'gemini-3.6-flash'])
-      );
+    let lastValidationErrors: string[] = [];
+    const candidateModels = Array.from(
+      new Set([this.model, 'gemini-2.5-flash', 'gemini-3.6-flash'])
+    );
 
-      for (let i = 0; i < candidateModels.length; i++) {
-        const currentModel = candidateModels[i];
-        try {
-          const response = await this.client.models.generateContent({
-            model: currentModel,
-            contents: prompt,
-            config: {
-              responseMimeType: 'application/json'
-            }
-          });
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const prompt = this.buildPrompt(title, description, lastValidationErrors, attempt);
+      const currentModel = candidateModels[(attempt - 1) % candidateModels.length];
 
-          const rawText = response.text ? response.text.trim() : '';
-          const parsed = this.parseGeminiResponse(rawText, title, description);
-          return parsed;
-        } catch (error: unknown) {
-          const errMsg = error instanceof Error ? error.message : String(error);
-          const isBusyOrRateLimit = errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429');
+      try {
+        console.log(`🤖 Agentic Loop (Attempt ${attempt}/${maxRetries}): Querying ${currentModel}...`);
 
-          if (isBusyOrRateLimit && i < candidateModels.length - 1) {
-            const nextModel = candidateModels[i + 1];
-            console.warn(
-              `⚠️ Gemini model '${currentModel}' is temporarily experiencing high demand (503). Switching to fallback model '${nextModel}'...`
-            );
-            // Brief pause before trying next candidate
-            await new Promise((res) => setTimeout(res, 300));
-            continue;
+        const response = await this.client.models.generateContent({
+          model: currentModel,
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json'
           }
+        });
 
-          if (isBusyOrRateLimit) {
-            console.warn(
-              '⚠️ All Gemini models are temporarily experiencing high cloud demand (503). Seamlessly applying smart fallback triage.'
-            );
-          } else {
-            console.warn('⚠️ Gemini API call encountered an error. Applying smart fallback triage:', errMsg);
-          }
-          break;
+        const rawText = response.text ? response.text.trim() : '';
+        if (!rawText) {
+          lastValidationErrors = ['Empty response text received from model.'];
+          console.warn(`⚠️ Attempt ${attempt} failed: Empty response. Retrying...`);
+          continue;
         }
+
+        let parsedJson: any;
+        try {
+          const cleanJson = rawText
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/i, '')
+            .trim();
+          parsedJson = JSON.parse(cleanJson);
+        } catch (parseError: any) {
+          lastValidationErrors = [`Invalid JSON syntax: ${parseError.message}`];
+          console.warn(`⚠️ Attempt ${attempt} failed: JSON syntax invalid. Retrying...`);
+          continue;
+        }
+
+        // Run validation function
+        const validation = validateClassificationOutput(parsedJson, title, description);
+        if (validation.isValid && validation.data) {
+          console.log(
+            `✅ Agentic Loop succeeded on attempt ${attempt}: Tagged [Category: ${validation.data.category}, Priority: ${validation.data.priority}]`
+          );
+
+          const { category, priority, summary, confidenceScore, recommendedAction } = validation.data;
+          const severity: IssueSeverity = priority;
+
+          return {
+            category,
+            severity,
+            priority,
+            iterations: attempt,
+            analysis: {
+              summary,
+              detectedCategory: category,
+              confidenceScore,
+              recommendedAction
+            }
+          };
+        }
+
+        // Validation failed: record errors to feed into next iteration's prompt
+        lastValidationErrors = validation.errors;
+        console.warn(
+          `⚠️ Attempt ${attempt} failed validation: ${lastValidationErrors.join(', ')}. Initiating agentic self-correction retry...`
+        );
+      } catch (error: any) {
+        const errMsg = error?.message || String(error);
+        lastValidationErrors = [`Model execution error: ${errMsg}`];
+        console.warn(`⚠️ Attempt ${attempt} encountered error: ${errMsg}. Retrying...`);
+
+        // Brief delay before next iteration
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
     }
 
-    // Fallback if client is unconfigured or all models are busy
+    console.warn(
+      `⚠️ Agentic Loop exhausted ${maxRetries} attempts. Seamlessly applying fallback triage.`
+    );
     return this.fallbackAnalysis(title, description);
   }
 
-  private parseGeminiResponse(
-    jsonText: string,
+  private buildPrompt(
     title: string,
-    description: string
-  ): AIAnalysisResult {
-    try {
-      // Clean possible markdown code fence wrappers (```json ... ```)
-      const cleanJson = jsonText
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
+    description: string,
+    previousErrors: string[],
+    attempt: number
+  ): string {
+    let errorFeedback = '';
+    if (previousErrors.length > 0) {
+      errorFeedback = `
+CRITICAL CORRECTION REQUIRED:
+Your previous output was REJECTED by the automated validation layer with the following errors:
+${previousErrors.map((err) => `- ${err}`).join('\n')}
 
-      const data: GeminiIssueAnalysisResponse = JSON.parse(cleanJson);
-
-      const category = data.category || 'Backend';
-      const rawPriority = (data.priority || 'medium').toLowerCase();
-      const priority: IssuePriority = this.normalizePriority(rawPriority);
-      const severity: IssueSeverity = priority;
-
-      const summary =
-        data.summary ||
-        `${title}: ${description.slice(0, 100)}... Tagged with ${priority} priority in ${category}.`;
-
-      const confidenceScore =
-        typeof data.confidenceScore === 'number'
-          ? Math.max(0, Math.min(1, data.confidenceScore))
-          : 0.95;
-
-      const recommendedAction =
-        data.recommendedAction ||
-        `Investigate ${category.toLowerCase()} logs and review recent changes related to ${title}.`;
-
-      const analysis: AIAnalysis = {
-        summary,
-        detectedCategory: category,
-        confidenceScore,
-        recommendedAction
-      };
-
-      return {
-        category,
-        severity,
-        priority,
-        analysis
-      };
-    } catch {
-      return this.fallbackAnalysis(title, description);
+You MUST strictly fix these errors in your JSON output. Ensure 'category' and 'priority' are both present, non-empty, and adhere to the schema.
+`;
     }
-  }
 
-  private normalizePriority(raw: string): IssuePriority {
-    if (raw.includes('crit')) return 'critical';
-    if (raw.includes('high')) return 'high';
-    if (raw.includes('low')) return 'low';
-    return 'medium';
+    return `You are an expert autonomous triage agent for the SmartFlow Issue Tracker.
+Analyze the following issue report:
+Title: "${title}"
+Description: "${description}"
+${errorFeedback}
+Return ONLY a valid, single JSON object (no markdown, no backticks, no markdown code fences, no introductory or concluding text) matching this EXACT specification:
+{
+  "category": "Frontend" | "Backend" | "Infrastructure" | "Database" | "Security" | "Performance" | "Network",
+  "priority": "low" | "medium" | "high" | "critical",
+  "summary": "Concise executive summary of the issue (1-2 sentences)",
+  "confidenceScore": 0.95,
+  "recommendedAction": "Concrete immediate steps recommended to resolve or mitigate this issue"
+}
+
+Mandatory rules:
+1. 'category' is strictly required and must specify the affected system component.
+2. 'priority' is strictly required and must be exactly one of: 'low', 'medium', 'high', 'critical'.`;
   }
 
   private fallbackAnalysis(title: string, description: string): AIAnalysisResult {
@@ -192,6 +289,7 @@ Evaluate the issue content and return ONLY a valid JSON object (no markdown, no 
       category,
       severity: priority,
       priority,
+      iterations: 0,
       analysis: {
         summary: `${title.trim()}. Classified as ${category} with ${priority} priority.`,
         detectedCategory: category,

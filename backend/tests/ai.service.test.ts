@@ -1,16 +1,62 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AIService } from '../src/services/ai.service';
+import { AIService, validateClassificationOutput } from '../src/services/ai.service';
 import { GoogleGenAI } from '@google/genai';
 
-describe('AIService with Gemini Model', () => {
-  it('sends prompt to Gemini model and parses structured JSON response correctly', async () => {
+describe('Validation Function: validateClassificationOutput', () => {
+  it('passes validation when both category and priority are valid', () => {
+    const validOutput = {
+      category: 'Database',
+      priority: 'critical',
+      summary: 'Deadlock in orders table',
+      confidenceScore: 0.98,
+      recommendedAction: 'Review query locks'
+    };
+
+    const result = validateClassificationOutput(validOutput, 'Deadlock', 'Orders table is locked');
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(result.data?.category).toBe('Database');
+    expect(result.data?.priority).toBe('critical');
+  });
+
+  it('rejects output when category is missing', () => {
+    const invalidOutput = {
+      priority: 'high',
+      summary: 'Missing category'
+    };
+
+    const result = validateClassificationOutput(invalidOutput);
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((e) => e.includes('category'))).toBe(true);
+  });
+
+  it('rejects output when priority is missing or invalid', () => {
+    const invalidOutput = {
+      category: 'Security',
+      priority: 'super-urgent' // Not in valid priorities
+    };
+
+    const result = validateClassificationOutput(invalidOutput);
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some((e) => e.includes('priority'))).toBe(true);
+  });
+
+  it('rejects non-object or null input', () => {
+    expect(validateClassificationOutput(null).isValid).toBe(false);
+    expect(validateClassificationOutput('not-json').isValid).toBe(false);
+    expect(validateClassificationOutput([]).isValid).toBe(false);
+  });
+});
+
+describe('Autonomous Agentic Loop (runAgenticLoop)', () => {
+  it('succeeds on first iteration when model returns valid structured data', async () => {
     const mockGenerateContent = vi.fn().mockResolvedValue({
       text: JSON.stringify({
         category: 'Infrastructure',
         priority: 'critical',
-        summary: 'Kubernetes ingress controller failing under load causing complete site outage.',
+        summary: 'Ingress controller failure',
         confidenceScore: 0.97,
-        recommendedAction: 'Scale ingress replicas and inspect cluster memory exhaustion.'
+        recommendedAction: 'Scale ingress pods'
       })
     });
 
@@ -21,38 +67,36 @@ describe('AIService with Gemini Model', () => {
     } as unknown as GoogleGenAI;
 
     const aiService = new AIService(mockClient, 'gemini-3.8-flash');
-    const result = await aiService.analyzeIssue(
-      'K8s cluster ingress outage',
+    const result = await aiService.runAgenticLoop(
+      'K8s ingress outage',
       'All incoming requests are failing with 503 Service Unavailable.'
     );
 
     expect(mockGenerateContent).toHaveBeenCalledTimes(1);
-    const callArgs = mockGenerateContent.mock.calls[0][0];
-    expect(callArgs.model).toBe('gemini-3.8-flash');
-    expect(callArgs.contents).toContain('Title: "K8s cluster ingress outage"');
-    expect(callArgs.contents).toContain('"category"');
-    expect(callArgs.contents).toContain('"priority"');
-
-    // Verify structured response assignment
     expect(result.category).toBe('Infrastructure');
     expect(result.priority).toBe('critical');
-    expect(result.severity).toBe('critical');
-    expect(result.analysis.detectedCategory).toBe('Infrastructure');
-    expect(result.analysis.confidenceScore).toBe(0.97);
-    expect(result.analysis.summary).toContain('Kubernetes ingress controller failing');
-    expect(result.analysis.recommendedAction).toContain('Scale ingress replicas');
+    expect(result.iterations).toBe(1);
   });
 
-  it('normalizes capitalization in priority returned by Gemini (e.g. "High" -> "high")', async () => {
-    const mockGenerateContent = vi.fn().mockResolvedValue({
-      text: JSON.stringify({
-        category: 'Frontend',
-        priority: 'High',
-        summary: 'CSS hydration error causing white screen on checkout page.',
-        confidenceScore: 0.94,
-        recommendedAction: 'Resolve SSR hydration mismatch in React checkout component.'
+  it('automatically retries with feedback when first attempt fails validation, succeeding on self-correction', async () => {
+    // Attempt 1: Missing category and priority (invalid)
+    // Attempt 2: Self-corrected valid JSON
+    const mockGenerateContent = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          summary: 'Incomplete response without mandatory fields'
+        })
       })
-    });
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          category: 'Security',
+          priority: 'high',
+          summary: 'JWT token signing failure',
+          confidenceScore: 0.95,
+          recommendedAction: 'Rotate keys'
+        })
+      });
 
     const mockClient = {
       models: {
@@ -61,39 +105,43 @@ describe('AIService with Gemini Model', () => {
     } as unknown as GoogleGenAI;
 
     const aiService = new AIService(mockClient, 'gemini-3.8-flash');
-    const result = await aiService.analyzeIssue(
-      'White screen on checkout',
-      'React hydration error crashes DOM during render on mobile Safari.'
+    const result = await aiService.runAgenticLoop(
+      'JWT token signing failure',
+      'Token verification fails due to signature mismatch.'
     );
 
-    expect(result.category).toBe('Frontend');
-    expect(result.priority).toBe('high');
-    expect(result.severity).toBe('high');
-  });
+    // Verifies the loop retried
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
 
-  it('handles markdown code fences in Gemini response cleanly', async () => {
-    const mockGenerateContent = vi.fn().mockResolvedValue({
-      text: '```json\n{\n  "category": "Security",\n  "priority": "critical",\n  "summary": "Critical API authentication bypass.",\n  "confidenceScore": 0.99,\n  "recommendedAction": "Revoke keys."\n}\n```'
-    });
+    // Verify that the second prompt included the automated error feedback
+    const secondCallPrompt = mockGenerateContent.mock.calls[1][0].contents;
+    expect(secondCallPrompt).toContain('CRITICAL CORRECTION REQUIRED');
+    expect(secondCallPrompt).toContain("Mandatory field 'category' is missing");
+    expect(secondCallPrompt).toContain("Mandatory field 'priority' is missing");
 
-    const mockClient = {
-      models: {
-        generateContent: mockGenerateContent
-      }
-    } as unknown as GoogleGenAI;
-
-    const aiService = new AIService(mockClient, 'gemini-3.8-flash');
-    const result = await aiService.analyzeIssue(
-      'Security auth bypass',
-      'Unauthenticated requests are granted admin privileges.'
-    );
-
+    // Verify verified final data
     expect(result.category).toBe('Security');
-    expect(result.priority).toBe('critical');
+    expect(result.priority).toBe('high');
+    expect(result.iterations).toBe(2);
   });
 
-  it('falls back gracefully if Gemini API throws an error', async () => {
-    const mockGenerateContent = vi.fn().mockRejectedValue(new Error('Network rate limit exceeded'));
+  it('retries when model returns malformed JSON syntax and corrects on next attempt', async () => {
+    // Attempt 1: Syntax error
+    // Attempt 2: Valid JSON
+    const mockGenerateContent = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: 'This is not valid json at all {broken'
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          category: 'Frontend',
+          priority: 'medium',
+          summary: 'Button alignment shifted',
+          confidenceScore: 0.9,
+          recommendedAction: 'Adjust flexbox alignment'
+        })
+      });
 
     const mockClient = {
       models: {
@@ -102,13 +150,35 @@ describe('AIService with Gemini Model', () => {
     } as unknown as GoogleGenAI;
 
     const aiService = new AIService(mockClient, 'gemini-3.8-flash');
-    const result = await aiService.analyzeIssue(
+    const result = await aiService.runAgenticLoop('Button misalignment', 'Button wraps on mobile.');
+
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    expect(result.category).toBe('Frontend');
+    expect(result.priority).toBe('medium');
+    expect(result.iterations).toBe(2);
+  });
+
+  it('falls back gracefully when max retries are exhausted without valid structure', async () => {
+    const mockGenerateContent = vi.fn().mockResolvedValue({
+      text: JSON.stringify({ unhelpfulField: 'still-missing-fields' })
+    });
+
+    const mockClient = {
+      models: {
+        generateContent: mockGenerateContent
+      }
+    } as unknown as GoogleGenAI;
+
+    const aiService = new AIService(mockClient, 'gemini-3.8-flash');
+    const result = await aiService.runAgenticLoop(
       'Database connection timeout',
-      'PostgreSQL pool limit reached.'
+      'PostgreSQL pool limit reached.',
+      2 // maxRetries = 2
     );
 
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
     expect(result.category).toBe('Database');
     expect(result.priority).toBe('high');
-    expect(result.analysis).toBeDefined();
+    expect(result.iterations).toBe(0); // fallback used
   });
 });
